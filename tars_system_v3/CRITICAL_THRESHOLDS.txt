@@ -1,0 +1,56 @@
+TARS SYSTEM - CRITICAL THRESHOLDS QUICK REFERENCE
+=================================================
+Version: 2026-01-06 v2 (Perfected)
+
+OBSTACLE AVOIDANCE (roam_behavior.py)
+-------------------------------------
+DIST_CLEAR      = 55 cm   (full speed)
+DIST_CAUTION    = 45 cm   (slow to 60%)
+DIST_BLOCKED    = 35 cm   (stop + turn)
+DIST_CRITICAL   = 18 cm   (emergency backup)
+
+SOFT_OBJECT_JUMP     = 50 cm  (sudden increase = absorbed pulse)
+SOFT_OBJECT_CONSEC   = 3      (readings before treating as blocked)
+
+ESCAPE ESCALATION (block count)
+-------------------------------
+1-2  blocks: Side escape (60 deg turn)
+3-4  blocks: Stuck (90+ deg turn)
+5-7  blocks: Very stuck (backup 1.0s + 120 deg)
+8-11 blocks: Hard escape (backup 1.2s + 150 deg)
+12+  blocks: Ultra stuck (backup 1.5s + 180 deg + reset)
+
+CLEAR_COUNT_TO_RESET = 10 (consecutive clear readings to reset)
+
+GESTURE DETECTION (gesture_detector.py)
+---------------------------------------
+SKIN_AREA_THRESHOLD     = 25%  (definite hand)
+SKIN_AREA_MIN_VARIANCE  = 3%   (variance-assisted detection)
+SKIN_AREA_TINY          = 1%   (REQUIRED for very-low-variance)
+
+VARIANCE_STRICT    = 100  (very low = blocked camera)
+VARIANCE_WITH_SKIN = 400  (low + some skin)
+
+OBSTACLE_DIST_THRESHOLD = 30 cm (disable variance when closer)
+CONSECUTIVE_FRAMES      = 4     (required for trigger)
+DEBOUNCE               = 2 sec
+
+CLIFF DETECTION (picarx_impl.py)
+--------------------------------
+CLIFF_THRESHOLD = 950 (grayscale > 950 = cliff)
+
+Normal floor:  300-700
+Cliff/edge:    > 950
+
+CLIFF RESPONSE (roam_behavior.py)
+---------------------------------
+Cooldown:      2 seconds
+Backup time:   1.2 seconds at forward_speed
+Turn angle:    120-150 degrees
+
+SENSOR NOTES
+------------
+- Invalid distance (< 0 or > 400) = likely TOO CLOSE
+- 2 consecutive invalid readings = emergency backup
+- Soft objects absorb ultrasonic = sudden jump or high variance
+- Grayscale sensors: HIGH value = poor reflection = cliff/void

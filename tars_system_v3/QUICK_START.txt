@@ -1,0 +1,68 @@
+╔══════════════════════════════════════════════════════════════════╗
+║                    TARS ROBOT - QUICK START                      ║
+╚══════════════════════════════════════════════════════════════════╝
+
+📡 SSH CONNECTION:
+   ssh pi@raspberrypi.local
+
+🚀 START TARS:
+   cd /home/mdigital/picar-x/tars_system
+   export OPENAI_API_KEY="sk-your-key-here"
+   ./start_tars.sh
+
+🛑 STOP TARS:
+   Press Ctrl+C
+
+══════════════════════════════════════════════════════════════════
+
+🎤 VOICE COMMANDS CHEAT SHEET:
+
+BASIC MOTION:
+  "move forward"          "turn left"
+  "move backward"         "turn right"
+  "stop"
+
+FUN ACTIONS:
+  "dance"                 "wiggle"
+  "turn around"           "spin"
+  "drive in a square"
+
+HEAD MOVEMENTS:
+  "look left"             "look right"
+  "look center"           "scan around"
+
+BEHAVIORS:
+  "start roaming"         "look at me"
+  "follow me"             "stop following"
+
+LANGUAGE:
+  "switch to english"
+  "pakeisk į lietuvių"
+
+CONVERSATION:
+  "what do you see?"
+  "tell me about yourself"
+  Ask any question!
+
+══════════════════════════════════════════════════════════════════
+
+💾 PERMANENT API KEY SETUP (one time):
+   echo 'export OPENAI_API_KEY="sk-your-key"' >> ~/.bashrc
+   source ~/.bashrc
+
+📊 BACKGROUND MODE (tmux):
+   tmux new -s tars
+   ./start_tars.sh
+   Ctrl+B, then D (to detach)
+   tmux attach -t tars (to reconnect)
+
+🔧 TROUBLESHOOTING:
+   Camera: vcgencmd get_camera
+   Audio:  arecord -l
+   Logs:   tail -f tars.log
+
+══════════════════════════════════════════════════════════════════
+✅ All v58 features working with real hardware!
+📚 Full docs: SSH_STARTUP_GUIDE.md
+🧪 Tests:     python3 -m unittest discover -s tests -v
+══════════════════════════════════════════════════════════════════
