@@ -65,7 +65,7 @@ TARS is a fully autonomous, AI-powered robot that sees, speaks, listens, dances,
 
 ## The Story
 
-This project started on **Kūčios (December 24, 2024)** — Lithuanian Christmas Eve. While most people were eating kūčiukai, I opened my laptop and started building a robot.
+This project started on **Kūčios (December 24, 2025)** — Lithuanian Christmas Eve. While most people were eating kūčiukai, I opened my laptop and started building a robot.
 
 Over the next **3 weeks**, working evenings after my day job and weekends, TARS went from a pile of parts to a fully autonomous robot that patrols the house, recognizes family members, dances on command, and makes sarcastic comments about the furniture.
 
