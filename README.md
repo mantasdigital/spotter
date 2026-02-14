@@ -5,7 +5,7 @@
 > *"What's my sarcasm setting?"*
 > *"100%."*
 
-TARS is a fully autonomous, AI-powered robot that sees, speaks, listens, dances, explores, and makes sarcastic comments about everything — all in Lithuanian. Built as a passion project over 3 weeks of evenings and weekends, starting on Kūčios (Lithuanian Christmas Eve) 2024.
+TARS is a fully autonomous, AI-powered robot that sees, speaks, listens, dances, explores, and makes sarcastic comments about everything — all in Lithuanian. Built as a passion project over 3 weeks of evenings and weekends, starting on Kūčios (Lithuanian Christmas Eve) 2025.
 
 ---
 
