@@ -8,6 +8,7 @@ from interaction.command_handlers.system_commands import SystemCommandHandler
 from interaction.command_handlers.macro_commands import MacroCommandHandler
 from interaction.command_handlers.web_search_commands import WebSearchCommandHandler
 from interaction.command_handlers.visual_commands import VisualCommandHandler
+from interaction.command_handlers.lt_command_handler import LithuanianCommandHandler
 
 __all__ = [
     'MotionCommandHandler',
@@ -16,4 +17,5 @@ __all__ = [
     'MacroCommandHandler',
     'WebSearchCommandHandler',
     'VisualCommandHandler',
+    'LithuanianCommandHandler',
 ]

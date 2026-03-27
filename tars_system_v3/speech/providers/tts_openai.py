@@ -4,11 +4,12 @@ Text-to-Speech using OpenAI TTS.
 Cloud-based high-quality speech synthesis using OpenAI's TTS API.
 """
 
+import hashlib
 import os
 import subprocess
 import tempfile
 import threading
-from typing import Optional
+from typing import Optional, Dict
 from pathlib import Path
 
 try:
@@ -69,6 +70,65 @@ class OpenAITTS(ITTS):
         self._speaking_lock = threading.Lock()
         self._playback_process: Optional[subprocess.Popen] = None
 
+        # Audio cache for frequently-used short responses
+        self._cache_dir = Path(tempfile.gettempdir()) / "tars_tts_cache"
+        self._cache_dir.mkdir(exist_ok=True)
+        self._cache_hits = 0
+        self._cache_misses = 0
+
+    def _cache_key(self, text: str) -> str:
+        """Generate cache key from text + voice + speed settings."""
+        key_str = f"{text}|{self.voice}|{self.model}|{self.speed}"
+        return hashlib.md5(key_str.encode()).hexdigest()
+
+    def _get_cached(self, text: str) -> Optional[str]:
+        """Return path to cached audio file if it exists."""
+        cache_path = self._cache_dir / f"{self._cache_key(text)}.mp3"
+        if cache_path.exists() and cache_path.stat().st_size > 0:
+            self._cache_hits += 1
+            return str(cache_path)
+        return None
+
+    def _save_to_cache(self, text: str, audio_path: str):
+        """Save audio file to cache (only for short responses)."""
+        if len(text) > 200:  # Only cache short phrases
+            return
+        try:
+            import shutil
+            cache_path = self._cache_dir / f"{self._cache_key(text)}.mp3"
+            shutil.copy2(audio_path, str(cache_path))
+        except Exception:
+            pass
+
+    def precache_responses(self, phrases: list):
+        """
+        Pre-generate and cache audio for common phrases.
+
+        Call this at startup to warm the cache with frequently used responses.
+        Runs in a background thread to not block startup.
+
+        Args:
+            phrases: List of text strings to pre-cache
+        """
+        def _precache():
+            for text in phrases:
+                if self._get_cached(text):
+                    continue  # Already cached
+                try:
+                    cache_path = self._cache_dir / f"{self._cache_key(text)}.mp3"
+                    response = self.client.audio.speech.create(
+                        model=self.model,
+                        voice=self.voice,
+                        input=text,
+                        speed=self.speed
+                    )
+                    response.stream_to_file(str(cache_path))
+                except Exception as e:
+                    print(f"[TTS-CACHE] Failed to precache '{text[:30]}': {e}")
+            print(f"[TTS-CACHE] Precached {len(phrases)} phrases")
+
+        threading.Thread(target=_precache, daemon=True).start()
+
     def speak(self, text: str, language: str = "en") -> bool:
         """
         Speak text using TTS engine (blocking).
@@ -88,6 +148,18 @@ class OpenAITTS(ITTS):
         try:
             with self._speaking_lock:
                 self._speaking = True
+
+            # Check cache first (instant playback for cached phrases)
+            cached_path = self._get_cached(text)
+            if cached_path:
+                try:
+                    self._play_audio(cached_path)
+                    return True
+                except Exception:
+                    pass  # Fall through to generate fresh
+                finally:
+                    with self._speaking_lock:
+                        self._speaking = False
 
             # Use streaming for faster playback start
             # Short text: regular method is fine
@@ -109,6 +181,9 @@ class OpenAITTS(ITTS):
 
                 # Save to file
                 response.stream_to_file(temp_path)
+
+                # Cache this response for future use
+                self._save_to_cache(text, temp_path)
 
                 # Play audio
                 self._play_audio(temp_path)

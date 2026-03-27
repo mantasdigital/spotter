@@ -75,7 +75,8 @@ from behaviors import RoamBehavior, StareBehavior, FollowBehavior, AutoRoamWatch
 from interaction import CommandProcessor
 from interaction.command_handlers import (
     MotionCommandHandler, BehaviorCommandHandler, SystemCommandHandler,
-    MacroCommandHandler, WebSearchCommandHandler, VisualCommandHandler
+    MacroCommandHandler, WebSearchCommandHandler, VisualCommandHandler,
+    LithuanianCommandHandler
 )
 
 # Memory
@@ -218,6 +219,28 @@ class TARSRobot:
             supported_languages={"en", "lt"}
         )
 
+        # Pre-cache common TTS responses in background
+        if hasattr(self.tts, 'precache_responses'):
+            common_phrases = [
+                # English
+                "Moving forward", "Moving backward", "Turning left", "Turning right",
+                "Stopping", "Dancing!", "Wiggling", "Spinning around", "Turning around",
+                "Looking left", "Looking right", "Looking straight ahead",
+                "Looking up", "Looking down", "Scanning the area",
+                "Starting to explore", "Stopped exploring",
+                "Watching you now", "Stopped watching",
+                "Following you now", "Stopped following",
+                "Switched to English",
+                # Lithuanian
+                "Vaziuoju pirmyn", "Vaziuoju atgal", "Suku i kaire", "Suku i desine",
+                "Sustojau", "Soku!", "Sukuosi", "Apsisuku",
+                "Ziuriu i kaire", "Ziuriu i desine", "Ziuriu tiesiai",
+                "Pradedu tyrineti", "Nustojau tyrineti",
+                "Dabar stebiu tave", "Dabar seku paskui tave", "Nustojau sekti",
+                "Gerai, dabar kalbesiu lietuviskai.",
+            ]
+            self.tts.precache_responses(common_phrases)
+
         print("   ✓ Language manager initialized")
 
     def _init_motion(self):
@@ -316,33 +339,44 @@ class TARSRobot:
         )
         self.command_processor.add_handler(system_handler)
 
-        # 2. Macro commands
+        # 2. Lithuanian fuzzy command handler (catches LT commands before English patterns)
+        lt_handler = LithuanianCommandHandler(
+            executor=self.executor,
+            state=self.state,
+            language_manager=self.language,
+            roam_behavior=self.roam,
+            stare_behavior=self.stare,
+            follow_behavior=self.follow,
+        )
+        self.command_processor.add_handler(lt_handler)
+
+        # 3. Macro commands
         macro_handler = MacroCommandHandler(
             macro_store=self.macros
         )
         self.command_processor.add_handler(macro_handler)
 
-        # 3. Visual labeling and recall
+        # 4. Visual labeling and recall
         visual_handler = VisualCommandHandler(
             visual_memory=self.visual_memory
         )
         self.command_processor.add_handler(visual_handler)
 
-        # 4. Web search and browse
+        # 5. Web search and browse
         web_handler = WebSearchCommandHandler(
             llm_provider=self.llm,
             language=self.language.get_current_language()
         )
         self.command_processor.add_handler(web_handler)
 
-        # 5. Motion commands
+        # 6. Motion commands
         motion_handler = MotionCommandHandler(
             executor=self.executor,
             state=self.state
         )
         self.command_processor.add_handler(motion_handler)
 
-        # 6. Behavior commands
+        # 7. Behavior commands
         behavior_handler = BehaviorCommandHandler(
             state=self.state,
             roam_behavior=self.roam,
@@ -352,7 +386,7 @@ class TARSRobot:
         )
         self.command_processor.add_handler(behavior_handler)
 
-        print("   ✓ Command processor initialized with 6 handlers")
+        print("   ✓ Command processor initialized with 7 handlers")
 
     def process_voice_command(self, audio_path: str):
         """
@@ -546,12 +580,20 @@ Keep responses concise and witty."""
             follow_behavior=self.follow,
             language_manager=self.language
         )
-        # Replace the old handler
+        # Replace the old behavior handler
         self.command_processor.handlers = [
             h for h in self.command_processor.handlers
             if not isinstance(h, BehaviorCommandHandler)
         ]
         self.command_processor.add_handler(behavior_handler)
+
+        # Update Lithuanian handler with real behavior instances
+        for h in self.command_processor.handlers:
+            if isinstance(h, LithuanianCommandHandler):
+                h.roam = self.roam
+                h.stare = self.stare
+                h.follow = self.follow
+                break
 
         # Initialize auto-roam watchdog (v58-style)
         # Starts roaming automatically after 60 seconds of inactivity

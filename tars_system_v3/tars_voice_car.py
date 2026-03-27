@@ -41,11 +41,10 @@ def _coordinated_speak(tars, text: str, language: str = "en", source: str = "com
     """
     Speak text with global TTS coordination to prevent voice overlap.
 
-    Waits for any current speech (e.g., roam observation) to finish,
-    then acquires TTS lock before speaking.
-
-    CRITICAL: Command speech has priority. We wait for roam to finish
-    but roam should detect command_processing flag and abort.
+    Waits for any current speech to finish, then speaks (blocking).
+    NOTE: Mid-speech wake word interrupt is intentionally NOT implemented
+    because the mic is next to the speaker — TARS's own voice would
+    trigger false wake-ups and cause self-interruption.
 
     Args:
         tars: TARSRobot instance (has tts and state)
@@ -60,36 +59,24 @@ def _coordinated_speak(tars, text: str, language: str = "en", source: str = "com
         return False
 
     # Mark command processing FIRST so roam knows to stop/skip speaking
-    # This ensures roam's _safe_speak will see the flag and abort
     already_processing = tars.state.interaction.is_command_processing()
     if not already_processing:
         tars.state.interaction.start_command_processing()
 
     try:
-        # Wait for any current roam speech to finish (max 10 seconds)
-        # Roam should detect command_processing and abort quickly
+        # Wait for any current speech to finish (max 3 seconds)
         if tars.state.tts.is_currently_speaking():
             current_source = tars.state.tts.get_speaking_source()
             print(f"[TTS-COORD] Waiting for {current_source} to finish...")
-            # Wait with longer timeout - roam should detect command flag and abort
-            if not tars.state.tts.wait_for_speech_end(timeout=10.0):
-                print(f"[TTS-COORD] Timeout waiting for {current_source}")
-                # Force clear ONLY if roam is the source (command has priority)
-                if current_source == "roam":
-                    print(f"[TTS-COORD] Force clearing roam lock for command priority")
-                    tars.state.tts.stop_speaking()
-                else:
-                    # Another command is speaking - wait more or skip
-                    print(f"[TTS-COORD] Another command speaking, waiting more...")
-                    tars.state.tts.wait_for_speech_end(timeout=5.0)
+            if not tars.state.tts.wait_for_speech_end(timeout=3.0):
+                print(f"[TTS-COORD] Timeout — force clearing {current_source}")
+                tars.tts.stop_speaking()
+                tars.state.tts.stop_speaking()
 
         # Acquire global TTS lock
         if not tars.state.tts.start_speaking(source):
-            # If we couldn't acquire, another speech started - wait briefly
-            time.sleep(0.5)
+            time.sleep(0.3)
             if not tars.state.tts.start_speaking(source):
-                print(f"[TTS-COORD] Couldn't acquire TTS lock after retry")
-                # Force acquire for command priority
                 tars.state.tts.stop_speaking()
                 tars.state.tts.start_speaking(source)
 
@@ -100,7 +87,6 @@ def _coordinated_speak(tars, text: str, language: str = "en", source: str = "com
         return False
     finally:
         tars.state.tts.stop_speaking()
-        # Only clear command_processing if we set it
         if not already_processing:
             tars.state.interaction.end_command_processing()
 
@@ -183,6 +169,71 @@ _setup_signal_handlers()
 # Path for saving audio for Lithuanian transcription
 LT_COMMAND_WAV_PATH = "/tmp/vac_last_command.wav"
 
+# Minimum audio duration (seconds) for wav2vec2 to process without crashing
+LT_ASR_MIN_AUDIO_SEC = 0.6
+
+
+def _pad_wav_if_short(wav_path: str, min_duration_sec: float = LT_ASR_MIN_AUDIO_SEC) -> bool:
+    """
+    Pad a WAV file with silence if it's too short for wav2vec2.
+
+    wav2vec2 crashes with "Kernel size can't be greater than actual input size"
+    on very short audio clips. This pads them to a safe minimum length.
+
+    Args:
+        wav_path: Path to WAV file to check/pad
+        min_duration_sec: Minimum duration in seconds
+
+    Returns:
+        True if file is usable (padded or already long enough), False on error
+    """
+    try:
+        with wave.open(wav_path, "rb") as wf:
+            frames = wf.getnframes()
+            rate = wf.getframerate()
+            channels = wf.getnchannels()
+            sampwidth = wf.getsampwidth()
+
+            # Validate WAV parameters
+            if rate == 0 or channels == 0 or sampwidth == 0:
+                print(f"[LT-ASR] Invalid WAV params: rate={rate} ch={channels} sw={sampwidth}")
+                return False
+
+            if frames == 0:
+                print(f"[LT-ASR] Empty WAV file (0 frames)")
+                return False
+
+            duration = frames / rate
+
+            if duration >= min_duration_sec:
+                return True
+
+            # Read existing audio
+            wf.rewind()
+            audio_data = wf.readframes(frames)
+
+        # Calculate how many silence frames we need
+        needed_frames = int(min_duration_sec * rate) - frames
+        if needed_frames <= 0:
+            return True
+
+        # Generate silence (zero bytes)
+        silence = b'\x00' * (needed_frames * channels * sampwidth)
+
+        # Rewrite WAV with padding
+        with wave.open(wav_path, "wb") as wf:
+            wf.setnchannels(channels)
+            wf.setsampwidth(sampwidth)
+            wf.setframerate(rate)
+            wf.writeframes(audio_data + silence)
+
+        print(f"[LT-ASR] Padded audio from {duration:.2f}s to {min_duration_sec:.2f}s")
+        return True
+
+    except Exception as e:
+        print(f"[LT-ASR] Failed to pad WAV: {e}")
+        return False
+
 
 def _init_lt_asr_async():
     """
@@ -239,6 +290,10 @@ def _wrap_vosk_stt_to_save_command_wav(vac):
             """
             Patched version that accumulates ALL audio chunks, including those
             that don't produce partial results (fixes the missing chunk bug).
+
+            Enhanced for Lithuanian: saves audio even when Vosk returns empty
+            text (Vosk English can't recognize Lithuanian but wav2vec2 can).
+            Also uses longer silence timeout to avoid cutting off Lithuanian words.
             """
             global _AUDIO_RECORDING, _AUDIO_CHUNKS, _AUDIO_SAMPLE_RATE
 
@@ -246,6 +301,10 @@ def _wrap_vosk_stt_to_save_command_wav(vac):
             _AUDIO_RECORDING = True
             _AUDIO_CHUNKS = []
             sr = samplerate or _AUDIO_SAMPLE_RATE
+            # Track consecutive empty frames to detect end-of-speech
+            # for Lithuanian (Vosk English may not detect Lithuanian speech endpoints well)
+            consecutive_empty = 0
+            has_partial = False  # Track if we've seen any partial results
 
             try:
                 import sounddevice as sd
@@ -260,11 +319,37 @@ def _wrap_vosk_stt_to_save_command_wav(vac):
 
                     while True:
                         if stt.stop_listening_event.is_set():
+                            # Save any accumulated audio before exiting
+                            # (Lithuanian speech may have been captured even if Vosk didn't recognize it)
+                            if _AUDIO_CHUNKS:
+                                try:
+                                    with wave.open(LT_COMMAND_WAV_PATH, "wb") as wf:
+                                        wf.setnchannels(1)
+                                        wf.setsampwidth(2)
+                                        wf.setframerate(sr)
+                                        wf.writeframes(b"".join(_AUDIO_CHUNKS))
+                                except Exception:
+                                    pass
                             return None
 
                         try:
                             data = q.get(timeout=0.5)
+                            consecutive_empty = 0
                         except queue.Empty:
+                            consecutive_empty += 1
+                            # After extended silence with captured audio,
+                            # save what we have for LT ASR even without Vosk final result
+                            if consecutive_empty >= 4 and has_partial and _AUDIO_CHUNKS:
+                                try:
+                                    with wave.open(LT_COMMAND_WAV_PATH, "wb") as wf:
+                                        wf.setnchannels(1)
+                                        wf.setsampwidth(2)
+                                        wf.setframerate(sr)
+                                        wf.writeframes(b"".join(_AUDIO_CHUNKS))
+                                    total_bytes = sum(len(c) for c in _AUDIO_CHUNKS)
+                                    print(f"[LT-ASR] Saved {total_bytes} bytes audio on silence timeout (sr={sr})")
+                                except Exception:
+                                    pass
                             continue
 
                         # CAPTURE ALL AUDIO for Lithuanian ASR
@@ -286,6 +371,16 @@ def _wrap_vosk_stt_to_save_command_wav(vac):
                             text = stt.recognizer.Result()
                             text = json.loads(text)["text"]
                             if text == "":
+                                # Even empty Vosk result — save audio for LT ASR
+                                if _AUDIO_CHUNKS and has_partial:
+                                    try:
+                                        with wave.open(LT_COMMAND_WAV_PATH, "wb") as wf:
+                                            wf.setnchannels(1)
+                                            wf.setsampwidth(2)
+                                            wf.setframerate(sr)
+                                            wf.writeframes(b"".join(_AUDIO_CHUNKS))
+                                    except Exception:
+                                        pass
                                 continue
                             result["done"] = True
                             result["final"] = text.strip()
@@ -310,6 +405,7 @@ def _wrap_vosk_stt_to_save_command_wav(vac):
                             partial = json.loads(partial)["partial"]
                             if partial == "" or partial.isspace():
                                 continue
+                            has_partial = True
                             result["partial"] = partial.strip()
                             yield result
             finally:
@@ -542,17 +638,15 @@ class LogInterceptor:
         if current_lang == "lt" and LT_ASR is not None:
             try:
                 if os.path.exists(LT_COMMAND_WAV_PATH) and os.path.getsize(LT_COMMAND_WAV_PATH) > 0:
-                    lt_text = LT_ASR.transcribe_wav(LT_COMMAND_WAV_PATH)
-                    print(f"[LT-ASR] Raw LT text: {repr(lt_text)}")
-                    if lt_text and lt_text.strip():
-                        print(f"[LT-ASR] Override Vosk text with LT: {lt_text.strip()}")
-                        command_text = lt_text.strip()
+                    # Pad short audio to prevent wav2vec2 "Kernel size" crash
+                    if _pad_wav_if_short(LT_COMMAND_WAV_PATH):
+                        lt_text = LT_ASR.transcribe_wav(LT_COMMAND_WAV_PATH)
+                        print(f"[LT-ASR] Raw LT text: {repr(lt_text)}")
+                        if lt_text and lt_text.strip():
+                            print(f"[LT-ASR] Override Vosk text with LT: {lt_text.strip()}")
+                            command_text = lt_text.strip()
             except Exception as e:
-                msg = str(e)
-                if "Kernel size can't be greater than actual input size" in msg:
-                    print(f"[LT-ASR] Short audio, skipping LT override: {e}")
-                else:
-                    print(f"[LT-ASR] Failed to transcribe LT audio: {e}")
+                print(f"[LT-ASR] Failed to transcribe LT audio: {e}")
 
         # Get camera image if available (using cached capture)
         image_data = None
@@ -835,9 +929,9 @@ class TARSVoiceActiveCar(VoiceActiveCar):
             # Call on_finish_a_round
             super().on_finish_a_round()
 
-            # Wait before next round
+            # Brief pause before next round (reduced from 1s for faster response)
             import time
-            time.sleep(1)
+            time.sleep(0.1)
 
           except KeyboardInterrupt:
             print("\n[TARS] Interrupted by user")
@@ -988,20 +1082,17 @@ class TARSVoiceActiveCar(VoiceActiveCar):
         if current_lang == "lt" and LT_ASR is not None:
             try:
                 if os.path.exists(LT_COMMAND_WAV_PATH) and os.path.getsize(LT_COMMAND_WAV_PATH) > 0:
-                    lt_text = LT_ASR.transcribe_wav(LT_COMMAND_WAV_PATH)
-                    print(f"[LT-ASR] Raw LT text: {repr(lt_text)}")
-                    if lt_text and lt_text.strip():
-                        print(f"[LT-ASR] Override Vosk text with LT: {lt_text.strip()}")
-                        text = lt_text.strip()
+                    # Pad short audio to prevent wav2vec2 "Kernel size" crash
+                    if _pad_wav_if_short(LT_COMMAND_WAV_PATH):
+                        lt_text = LT_ASR.transcribe_wav(LT_COMMAND_WAV_PATH)
+                        print(f"[LT-ASR] Raw LT text: {repr(lt_text)}")
+                        if lt_text and lt_text.strip():
+                            print(f"[LT-ASR] Override Vosk text with LT: {lt_text.strip()}")
+                            text = lt_text.strip()
                 else:
                     print(f"[LT-ASR] No usable WAV at {LT_COMMAND_WAV_PATH} (file missing or empty).")
             except Exception as e:
-                msg = str(e)
-                if "Kernel size can't be greater than actual input size" in msg:
-                    # LT-ASR chunk too short; keep Vosk text but don't crash
-                    print(f"[LT-ASR] Short audio, skipping LT override: {e}")
-                else:
-                    print(f"[LT-ASR] Failed to transcribe LT audio: {e}")
+                print(f"[LT-ASR] Failed to transcribe LT audio: {e}")
 
         # INLINE WAKE DETECTION: Check if text contains wake word
         # Only strip wake word if at START of phrase (not in middle like "that the gnome")
@@ -1130,8 +1221,18 @@ class TARSVoiceActiveCar(VoiceActiveCar):
         print("[DEBUG] on_wake() called")
 
         # CRITICAL: Set command processing flag IMMEDIATELY when wake detected
-        # This blocks roam observations from speaking while we listen for command
         self.tars.state.interaction.start_command_processing()
+
+        # Interrupt roam speech immediately (roam talks while user is idle,
+        # so wake word during roam speech is always a real user)
+        # NOTE: We do NOT interrupt command response speech because the mic
+        # is next to the speaker — TARS's own voice would trigger false wakes
+        if self.tars.state.tts.is_currently_speaking():
+            current_source = self.tars.state.tts.get_speaking_source()
+            if current_source == "roam":
+                print(f"[TTS-COORD] Interrupting roam speech for wake word")
+                self.tars.tts.stop_speaking()
+                self.tars.state.tts.stop_speaking()
 
         # Only announce if it's not an inline command
         if not self.processing_inline_command:

@@ -5,7 +5,7 @@ Provides command processing and voice interaction capabilities.
 """
 
 from interaction.command_processor import CommandProcessor, SimpleCommandRouter, MockCommandProcessor
-from interaction.command_handlers import MotionCommandHandler, BehaviorCommandHandler
+from interaction.command_handlers import MotionCommandHandler, BehaviorCommandHandler, LithuanianCommandHandler
 
 __all__ = [
     'CommandProcessor',
@@ -13,4 +13,5 @@ __all__ = [
     'MockCommandProcessor',
     'MotionCommandHandler',
     'BehaviorCommandHandler',
+    'LithuanianCommandHandler',
 ]
