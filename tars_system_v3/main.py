@@ -273,29 +273,40 @@ class TARSRobot:
         print("   ✓ Motion system initialized")
 
     def _init_llm(self):
-        """Initialize LLM and dependent systems."""
-        # LLM provider
+        """
+        Initialize LLM and dependent systems.
+
+        Supports two backends controlled by TARS_LLM_BACKEND env var:
+        - "openai" (default): Uses OpenAI API (requires OPENAI_API_KEY)
+        - "local": Uses Ollama running locally (requires ollama installed)
+        """
+        backend = os.getenv("TARS_LLM_BACKEND", "openai").lower()
+
+        if backend == "local":
+            self._init_llm_local()
+        else:
+            self._init_llm_openai()
+
+    def _init_llm_openai(self):
+        """Initialize LLM using OpenAI cloud API."""
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             print("   ✗ OPENAI_API_KEY not set")
             print("   ✗ LLM features will not be available")
             self.llm = None
+            self.scene_analyzer = None
+            self.agent = None
             return
 
         try:
             from picarx.llm import OpenAI as LLM
             from llm.provider_wrapper import OpenAIProviderWrapper
 
-            # Create raw LLM instance
             raw_llm = LLM(api_key, model="gpt-4o")
-
-            # Wrap it to add ILLMProvider interface compatibility
             self.llm = OpenAIProviderWrapper(raw_llm)
 
-            # Create scene analyzer now that we have LLM
             self.scene_analyzer = SceneAnalyzer(self.llm, model_name="gpt-4o")
 
-            # Create conversation agent
             self.agent = ConversationAgent(
                 llm_provider=self.llm,
                 character_state=self.character,
@@ -304,13 +315,49 @@ class TARSRobot:
                 executor=self.executor
             )
 
-            print("   ✓ LLM initialized (gpt-4o)")
+            print("   ✓ LLM initialized (OpenAI gpt-4o)")
 
         except Exception as e:
             print(f"   ✗ LLM initialization failed: {e}")
             self.llm = None
             self.scene_analyzer = None
             self.agent = None
+
+    def _init_llm_local(self):
+        """Initialize LLM using local Ollama."""
+        try:
+            from llm.local_provider import OllamaProvider
+
+            model = os.getenv("TARS_LOCAL_MODEL", "gemma2:2b")
+            ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+
+            provider = OllamaProvider(model=model, base_url=ollama_host)
+
+            if not provider.is_available():
+                print(f"   ✗ Ollama not available — falling back to OpenAI")
+                self._init_llm_openai()
+                return
+
+            self.llm = provider
+
+            # Scene analyzer needs vision — local models can't do that,
+            # so we skip it (vision queries will use text-only responses)
+            self.scene_analyzer = None
+
+            self.agent = ConversationAgent(
+                llm_provider=self.llm,
+                character_state=self.character,
+                conversation_memory=self.conversation,
+                visual_memory=self.visual_memory,
+                executor=self.executor,
+                fast_model=model,  # Use same model for fast path
+            )
+
+            print(f"   ✓ LLM initialized (local Ollama: {model})")
+
+        except Exception as e:
+            print(f"   ✗ Local LLM failed: {e} — falling back to OpenAI")
+            self._init_llm_openai()
 
     def _init_behaviors(self):
         """Initialize autonomous behaviors."""
@@ -453,14 +500,21 @@ class TARSRobot:
             # Import TARS voice car
             from tars_voice_car import TARSVoiceActiveCar
 
-            # Check LLM availability
+            # Check LLM availability — create fallback if needed
             if not self.llm:
-                print("[TARS] WARNING: No LLM available, creating fallback")
-                from picarx.llm import OpenAI as LLM
-                from llm.provider_wrapper import OpenAIProviderWrapper
-                api_key = os.getenv("OPENAI_API_KEY", "dummy")
-                raw_llm = LLM(api_key, model="gpt-4o")
-                self.llm = OpenAIProviderWrapper(raw_llm)
+                backend = os.getenv("TARS_LLM_BACKEND", "openai").lower()
+                if backend == "local":
+                    print("[TARS] WARNING: Local LLM not available")
+                else:
+                    print("[TARS] WARNING: No LLM available, creating fallback")
+                    try:
+                        from picarx.llm import OpenAI as LLM
+                        from llm.provider_wrapper import OpenAIProviderWrapper
+                        api_key = os.getenv("OPENAI_API_KEY", "dummy")
+                        raw_llm = LLM(api_key, model="gpt-4o")
+                        self.llm = OpenAIProviderWrapper(raw_llm)
+                    except Exception:
+                        print("[TARS] WARNING: Fallback LLM creation failed")
 
             # Define wake words
             wake_words = [
