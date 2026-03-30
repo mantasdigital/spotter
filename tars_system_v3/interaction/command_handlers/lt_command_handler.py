@@ -136,8 +136,14 @@ class LithuanianCommandHandler:
         elif category == "system":
             return self._handle_system(action_key)
         elif category == "vision":
-            # Let vision handler deal with this (return not handled)
-            return {"success": False, "action": "vision_passthrough", "message": ""}
+            # Translate to English equivalent so downstream vision pipeline works
+            # "ka matai" → "what do you see" which the LLM vision handler recognizes
+            return {
+                "success": False,
+                "action": "vision_query",
+                "message": "",
+                "translated_command": "what do you see",
+            }
         elif category == "web":
             # Let web handler deal with this
             return {"success": False, "action": "web_passthrough", "message": ""}

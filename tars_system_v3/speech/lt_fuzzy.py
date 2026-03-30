@@ -111,7 +111,8 @@ LT_COMMANDS: Dict[str, Tuple[str, str, List[str]]] = {
     "kairen":       ("motion", "turn_left",   ["kairen", "i kaire", "suk i kaire", "pasuk i kaire", "suk kairen"]),
     "desinen":      ("motion", "turn_right",  ["desinen", "i desine", "suk i desine", "pasuk i desine", "suk desinen"]),
     "stok":         ("motion", "stop",        ["stok", "sustok", "stop", "stot", "nutilk"]),
-    "apsisuk":      ("motion", "turn_around", ["apsisuk", "apsisuki", "apsisukti", "apsisuk ratu"]),
+    "apsisuk":      ("motion", "turn_around", ["apsisuk", "apsisuki", "apsisukti", "apsisuk ratu",
+                                                  "apsizuog", "apsizuok", "apsisug", "apsisuok"]),
     "sukis":        ("motion", "spin",        ["sukis", "sukis ratu", "pasukis", "apsisuk ratu"]),
 
     # ── Fun actions ──

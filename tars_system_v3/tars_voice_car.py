@@ -632,21 +632,12 @@ class LogInterceptor:
             clear_actions: If True, clear accumulated actions before processing.
                           Set to False when processing sub-commands in a multi-command sequence.
         """
-        # LITHUANIAN ASR OVERRIDE (from v58)
-        # If in Lithuanian mode and LT_ASR is available, use it to transcribe the saved audio
-        current_lang = self.tars_vac.tars.language.get_current_language()
-        if current_lang == "lt" and LT_ASR is not None:
-            try:
-                if os.path.exists(LT_COMMAND_WAV_PATH) and os.path.getsize(LT_COMMAND_WAV_PATH) > 0:
-                    # Pad short audio to prevent wav2vec2 "Kernel size" crash
-                    if _pad_wav_if_short(LT_COMMAND_WAV_PATH):
-                        lt_text = LT_ASR.transcribe_wav(LT_COMMAND_WAV_PATH)
-                        print(f"[LT-ASR] Raw LT text: {repr(lt_text)}")
-                        if lt_text and lt_text.strip():
-                            print(f"[LT-ASR] Override Vosk text with LT: {lt_text.strip()}")
-                            command_text = lt_text.strip()
-            except Exception as e:
-                print(f"[LT-ASR] Failed to transcribe LT audio: {e}")
+        # SKIP LT-ASR override for inline commands — the WAV file contains audio
+        # from a previous listen() session, not this inline command's audio.
+        # Inline commands are detected via stdout interception of Vosk output,
+        # so we use the Vosk text directly and let fuzzy matching handle it.
+        # (LT-ASR override still works in on_heard() and main loop paths where
+        # the WAV matches the current utterance)
 
         # Get camera image if available (using cached capture)
         image_data = None
@@ -668,8 +659,9 @@ class LogInterceptor:
                 if self.tars_vac.tars.agent:
                     try:
                         current_lang = self.tars_vac.tars.language.get_current_language()
-                        # Pass image_data for vision queries like "what do you see"
-                        response = self.tars_vac.tars.agent.chat(command_text, language=current_lang, image_data=image_data)
+                        # Use translated command if LT handler provided one
+                        agent_text = result.get("translated_command", command_text)
+                        response = self.tars_vac.tars.agent.chat(agent_text, language=current_lang, image_data=image_data)
                     except Exception as e:
                         print(f"[ERROR] Agent failed: {e}")
                         response = "I don't understand."
@@ -908,8 +900,9 @@ class TARSVoiceActiveCar(VoiceActiveCar):
                         if self.tars.agent:
                             try:
                                 current_lang = self.tars.language.get_current_language()
-                                # Pass image_data for vision queries like "what do you see"
-                                response = self.tars.agent.chat(sub_message, language=current_lang, image_data=image_data)
+                                # Use translated command if LT handler provided one
+                                agent_text = result.get("translated_command", sub_message)
+                                response = self.tars.agent.chat(agent_text, language=current_lang, image_data=image_data)
                             except Exception as e:
                                 print(f"[ERROR] Agent failed: {e}")
                                 response = "I don't understand."
@@ -1185,8 +1178,10 @@ class TARSVoiceActiveCar(VoiceActiveCar):
                 if self.tars.agent:
                     try:
                         current_lang = self.tars.language.get_current_language()
-                        # Pass image_data for vision queries like "what do you see"
-                        response = self.tars.agent.chat(sub_text, language=current_lang, image_data=image_data)
+                        # Use translated command if LT handler provided one
+                        # (e.g., "ka matai" → "what do you see" for vision)
+                        agent_text = result.get("translated_command", sub_text)
+                        response = self.tars.agent.chat(agent_text, language=current_lang, image_data=image_data)
                     except Exception as e:
                         print(f"[ERROR] Agent failed: {e}")
                         response = "I don't understand that command."
