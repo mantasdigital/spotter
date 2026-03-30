@@ -75,13 +75,69 @@ The highlight? **Making grandparents happy.** Watching them interact with TARS, 
 
 ---
 
+## Setup
+
+### Default (Cloud AI — OpenAI)
+
+```bash
+# Set your OpenAI API key
+export OPENAI_API_KEY=sk-your-key-here
+
+# Run from inside picar-x directory
+cd ~/picar-x/tars_system_v3
+chmod +x start_tars.sh
+./start_tars.sh
+```
+
+### Local AI (Ollama — no cloud needed)
+
+Run TARS with a local AI model instead of OpenAI. No API key required, fully offline.
+
+**Step 1: Install Ollama (~150MB)**
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+```
+
+**Step 2: Pull a model (pick one)**
+
+| Model | Size | Speed on Pi | Quality | Command |
+|-------|------|-------------|---------|---------|
+| gemma2:2b | 1.6GB | Fast (~5 tok/s) | Good for commands | `ollama pull gemma2:2b` |
+| phi3:mini | 2.3GB | Medium (~3 tok/s) | Better conversation | `ollama pull phi3:mini` |
+| mistral | 4GB | Slow (~2 tok/s) | Best quality | `ollama pull mistral` |
+
+**Step 3: Run TARS in local mode**
+```bash
+export TARS_LLM_BACKEND=local
+export TARS_LOCAL_MODEL=gemma2:2b   # optional, this is the default
+
+cd ~/picar-x/tars_system_v3
+python3 main.py
+```
+
+**Notes:**
+- If Ollama is not running or the model is not pulled, TARS automatically falls back to OpenAI
+- Vision queries ("what do you see") need OpenAI — local models can't process images
+- All voice commands (movement, roaming, Lithuanian) work the same regardless of backend
+- You can switch back anytime: `export TARS_LLM_BACKEND=openai` or just unset the variable
+
+---
+
 ## Project Structure
 
 ```
 spotter/
 └── tars_system_v3/          # Main robot system (v3)
-    ├── ...                   # Vision, movement, speech, memory modules
-    └── ...                   # Configuration and personality
+    ├── main.py              # Entry point
+    ├── tars_voice_car.py    # Voice loop + wake word detection
+    ├── config/              # Settings
+    ├── speech/              # STT (Vosk), TTS (OpenAI/Piper), Lithuanian fuzzy matching
+    ├── llm/                 # AI agents (OpenAI or local Ollama)
+    ├── vision/              # Camera, face detection, scene analysis
+    ├── motion/              # Movement, safety, action execution
+    ├── behaviors/           # Roaming, following, face tracking
+    ├── interaction/         # Command processing + handlers
+    └── memory/              # Conversation, character, macros, visual memory
 ```
 
 ---

@@ -1005,11 +1005,14 @@ If you see any of these objects, use their NAME instead of generic descriptions.
 For example, say "Doris the microphone" instead of "a microphone" if you see that microphone."""
 
             # Build a vision prompt with TARS personality
+            language_instruction = ""
+            if language == "lt":
+                language_instruction = "\n\nIMPORTANT: You MUST respond ENTIRELY in Lithuanian. Every word of your response must be in Lithuanian language."
+
             system_prompt = f"""You are TARS, a sarcastic reconnaissance robot.
 Describe what you see in the image, then add a witty remark.
 Keep it concise (2-3 sentences max).
-Character summary: {self.character.summary}
-Language: {"Lithuanian" if language == "lt" else "English"}
+Character summary: {self.character.summary}{language_instruction}
 {known_items_str}"""
 
             # Create vision message with image
